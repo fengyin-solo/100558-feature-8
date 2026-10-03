@@ -32,6 +32,13 @@ export type ActionResult = {
   message: string
 }
 
+/** 操作人身份：放行权限按角色 + 所属仓库判定，页面只负责把身份带进来。 */
+export type Actor = {
+  operator: string
+  role: string
+  warehouse: string
+}
+
 export type OverviewResult = {
   cards: { label: string; value: number }[]
   modules: { name: string; created: number; pending: number; abnormal: number }[]

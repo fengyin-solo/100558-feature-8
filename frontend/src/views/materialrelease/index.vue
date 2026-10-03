@@ -3,13 +3,18 @@
     <header class="page-head">
       <div>
         <h2>物料放行管理</h2>
-        <p class="page-desc">维护物料放行单，围绕物料批号、物料名称、供应商、检验单号做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护物料放行单，围绕物料批号、所属仓库、供应商、检验单号做登记、筛选与状态流转。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记物料放行单</button>
         <button class="btn" type="button" @click="exportRows">导出物料放行清单</button>
       </div>
     </header>
+
+    <p class="actor-line">
+      当前操作人：{{ actorLabel }}。放行按仓库归属管理：只有本仓库且分工到该批号的放行人能确认/拒绝放行；
+      冻结与批准解冻归质量部；解冻须重新提申请；已放行记录只读，重复确认只算一次。
+    </p>
 
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
@@ -65,8 +70,25 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条物料放行记录</span>
+      <span v-if="noticeMessage" class="notice-text">{{ noticeMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <div v-if="releaseTarget" class="modal-mask">
+      <div class="modal-card">
+        <h3>确认放行</h3>
+        <p class="modal-line">物料批号：{{ releaseTarget['物料批号'] }}（{{ releaseTarget['所属仓库'] }}）</p>
+        <p class="modal-line">待放行数量：{{ releaseTarget['待放行数量'] }}</p>
+        <label class="filter-item">
+          <span>放行数量</span>
+          <input v-model.number="releaseQuantity" type="number" min="0" step="any" />
+        </label>
+        <div class="modal-actions">
+          <button class="btn primary" type="button" @click="confirmRelease">确认放行</button>
+          <button class="btn ghost" type="button" @click="closeRelease">取消</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -77,21 +99,44 @@ import {
   downloadEntries,
   listEntries,
   moduleMeta,
-  runAction as applyAction,
+  runReleaseAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import { useSessionStore } from '@/stores/session'
 
 const meta = moduleMeta('materialrelease')
-const columns = ["物料批号", "物料名称", "供应商", "检验单号", "放行数量", "放行人", "放行日期", "放行状态"]
-const actions = ["确认放行", "拒绝放行", "冻结物料"]
-const statuses = ["待放行", "已放行", "已拒绝", "已冻结"]
-const stats = [{"label": "待放行物料", "value": 0}, {"label": "已放行物料", "value": 0}, {"label": "已冻结物料", "value": 0}]
+const session = useSessionStore()
+const columns = ["物料批号", "物料名称", "所属仓库", "供应商", "检验单号", "关联批号", "待放行数量", "放行数量", "放行人", "放行日期"]
+const actions = ["确认放行", "拒绝放行", "冻结物料", "申请解冻", "批准解冻"]
+const statuses = ["待放行", "已放行", "已拒绝", "已冻结", "解冻申请中"]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const noticeMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const releaseTarget = ref<EntryRow | null>(null)
+const releaseQuantity = ref<number>(0)
+
+const actorLabel = computed(() =>
+  session.warehouse
+    ? `${session.operator}（${session.role} · ${session.warehouse}）`
+    : `${session.operator}（${session.role}）`,
+)
+
+const stats = computed(() => [
+  { label: '待放行物料', value: rows.value.filter((row) => row.status === '待放行').length },
+  { label: '已放行物料', value: rows.value.filter((row) => row.status === '已放行').length },
+  { label: '已冻结物料', value: rows.value.filter((row) => row.status === '已冻结').length },
+  {
+    label: '累计放行数量',
+    value: rows.value
+      .filter((row) => row.status === '已放行')
+      .reduce((sum, row) => sum + Number(row['放行数量'] ?? 0), 0),
+  },
+])
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -114,16 +159,46 @@ function openCreate() {
 
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
+  noticeMessage.value = ''
+  // 待放行的确认放行先录入放行数量，越界或超限会在服务端挡回。
+  if (action === '确认放行' && String(row.status) === '待放行') {
+    releaseTarget.value = row
+    releaseQuantity.value = Number(row['待放行数量'] ?? 0)
+    return
+  }
+  const result = runReleaseAction(Number(row.id), action, session.actor)
   if (!result.ok) {
     errorMessage.value = result.message
     return
   }
+  noticeMessage.value = result.message
   reload()
 }
 
+function confirmRelease() {
+  if (!releaseTarget.value) {
+    return
+  }
+  const result = runReleaseAction(
+    Number(releaseTarget.value.id),
+    '确认放行',
+    session.actor,
+    Number(releaseQuantity.value),
+  )
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+  noticeMessage.value = result.message
+  releaseTarget.value = null
+  reload()
+}
+
+function closeRelease() {
+  releaseTarget.value = null
+}
+
 function reload() {
-  errorMessage.value = ''
   try {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items

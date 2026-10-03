@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>批生产记录管理</h2>
-        <p class="page-desc">维护批生产记录，围绕批号、产品名称、生产工序、投料量做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护批生产记录，围绕批号、产品名称、生产工序、投料量做登记、筛选与状态流转。物料放行结论由放行流程回写，放行数量与物料放行台账共用一份。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记批生产记录</button>
@@ -75,14 +75,14 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
-  listEntries,
+  listBatchLedger,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('batchrecord')
-const columns = ["批号", "产品名称", "生产工序", "投料量", "操作人", "复核人", "起始时间", "批记录状态"]
+const columns = ["批号", "产品名称", "生产工序", "投料量", "操作人", "复核人", "起始时间", "批记录状态", "物料放行结论", "放行数量"]
 const actions = ["提交编制", "送交复核", "归档批记录"]
 const statuses = ["待编制", "编制中", "已复核", "已归档"]
 const stats = [{"label": "待编制批记录", "value": 0}, {"label": "编制中批记录", "value": 0}, {"label": "本月归档数", "value": 0}]
@@ -125,7 +125,8 @@ function runAction(action: string, row: EntryRow) {
 function reload() {
   errorMessage.value = ''
   try {
-    const payload = listEntries(meta.key, filters.value)
+    // 台账的放行数量与物料放行模块共用一份数据，由服务层按关联批号汇总。
+    const payload = listBatchLedger(filters.value)
     rows.value = payload.items
     total.value = payload.total
   } catch (error) {

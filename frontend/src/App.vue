@@ -11,7 +11,15 @@
     <main class="app-main">
       <header class="app-head">
         <span class="head-desc">面向洁净区环境监测、批生产记录编录、物料放行、偏差与变更控制、灭菌与清洁验证、成品检验与年度质量回顾的一体化药品生产质量管理工作台。</span>
-        <span class="head-user">当前值班：{{ store.operator }} · {{ store.shiftLabel }}</span>
+        <span class="head-user">
+          当前值班：
+          <select class="persona-select" :value="store.operator" @change="switchPersona">
+            <option v-for="item in personas" :key="item.operator" :value="item.operator">
+              {{ personaLabel(item) }}
+            </option>
+          </select>
+          · {{ store.shiftLabel }}
+        </span>
       </header>
       <RouterView />
     </main>
@@ -19,9 +27,25 @@
 </template>
 
 <script setup lang="ts">
-import { useSessionStore } from '@/stores/session'
+import { PERSONAS, useSessionStore } from '@/stores/session'
+import type { Persona } from '@/stores/session'
 
 const store = useSessionStore()
+const personas = PERSONAS
+
+function personaLabel(item: Persona): string {
+  return item.warehouse
+    ? `${item.operator}（${item.role} · ${item.warehouse}）`
+    : `${item.operator}（${item.role}）`
+}
+
+function switchPersona(event: Event) {
+  const name = (event.target as HTMLSelectElement).value
+  const persona = personas.find((item) => item.operator === name)
+  if (persona) {
+    store.setPersona(persona)
+  }
+}
 
 const navItems = [{ label: "运营概览", path: "/" }, { label: "批生产记录", path: "/batchrecord" }, { label: "洁净区环境监测", path: "/cleanroom" }, { label: "物料放行", path: "/materialrelease" }, { label: "偏差处理", path: "/deviation" }, { label: "变更控制", path: "/changecontrol" }, { label: "清洁验证", path: "/cleanvalidate" }, { label: "灭菌验证", path: "/sterilize" }, { label: "培养基模拟灌装", path: "/mediafill" }, { label: "工艺用水监测", path: "/watermonitor" }, { label: "更衣确认", path: "/gowning" }, { label: "成品检验", path: "/finishedqc" }, { label: "留样管理", path: "/retainsample" }, { label: "稳定性考察", path: "/stability" }, { label: "产品召回", path: "/recall" }, { label: "供应商审计", path: "/supplieraudit" }, { label: "人员培训", path: "/training" }, { label: "年度质量回顾", path: "/annualreview" }, { label: "质量投诉", path: "/complaint" }]
 </script>

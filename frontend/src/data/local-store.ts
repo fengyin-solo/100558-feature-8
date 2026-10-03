@@ -1,11 +1,39 @@
+import { migrateEntries, STORAGE_VERSION } from './migrations'
 import { SEED_ROWS } from './seed'
 import type { EntryRow } from './types'
 
 // 本地持久化：数据放在 localStorage 里，刷新、关掉再打开都还在。
+// 存储带版本号；读到旧版（无版本号）的存量数据时先按旧记录回填迁移，再继续用。
 const STORAGE_KEY = 'pharma-cleanroom:entries'
+
+type StorageShape = {
+  version: number
+  entries: Record<string, EntryRow[]>
+}
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function persist(entries: Record<string, EntryRow[]>): void {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return
+  }
+  const payload: StorageShape = { version: STORAGE_VERSION, entries }
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+}
+
+function sanitize(value: unknown): Record<string, EntryRow[]> {
+  if (!value || typeof value !== 'object') {
+    return {}
+  }
+  const clean: Record<string, EntryRow[]> = {}
+  for (const [key, rows] of Object.entries(value as Record<string, unknown>)) {
+    if (Array.isArray(rows)) {
+      clean[key] = rows as EntryRow[]
+    }
+  }
+  return clean
 }
 
 function readStorage(): Record<string, EntryRow[]> {
@@ -15,14 +43,25 @@ function readStorage(): Record<string, EntryRow[]> {
   }
   const raw = window.localStorage.getItem(STORAGE_KEY)
   if (!raw) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
+    persist(fallback)
     return fallback
   }
   try {
-    const parsed = JSON.parse(raw) as Record<string, EntryRow[]>
-    return { ...fallback, ...parsed }
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') {
+      persist(fallback)
+      return fallback
+    }
+    // 旧版存量数据：整个对象就是各模块记录，没有版本号，按旧记录回填迁移。
+    const entries =
+      'entries' in parsed
+        ? sanitize((parsed as StorageShape).entries)
+        : migrateEntries(sanitize(parsed))
+    const merged = { ...fallback, ...entries }
+    persist(merged)
+    return merged
   } catch {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
+    persist(fallback)
     return fallback
   }
 }
@@ -43,9 +82,7 @@ export function listRows(key: string): EntryRow[] {
 export function saveRows(key: string, rows: EntryRow[]): void {
   const next = { ...allRows(), [key]: rows }
   cache = next
-  if (typeof window !== 'undefined' && window.localStorage) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-  }
+  persist(next)
 }
 
 export function resetRows(key: string): EntryRow[] {

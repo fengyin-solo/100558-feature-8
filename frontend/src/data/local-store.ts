@@ -1,3 +1,4 @@
+import { migrateRows } from './migrate'
 import { SEED_ROWS } from './seed'
 import type { EntryRow } from './types'
 
@@ -8,23 +9,35 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+function persist(data: Record<string, EntryRow[]>): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  }
+}
+
 function readStorage(): Record<string, EntryRow[]> {
-  const fallback = clone(SEED_ROWS)
   if (typeof window === 'undefined' || !window.localStorage) {
-    return fallback
+    return clone(SEED_ROWS)
   }
   const raw = window.localStorage.getItem(STORAGE_KEY)
   if (!raw) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
-    return fallback
+    const seeded = clone(SEED_ROWS)
+    persist(seeded)
+    return seeded
   }
+  let parsed: Record<string, EntryRow[]>
   try {
-    const parsed = JSON.parse(raw) as Record<string, EntryRow[]>
-    return { ...fallback, ...parsed }
+    parsed = JSON.parse(raw) as Record<string, EntryRow[]>
   } catch {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
+    const fallback = clone(SEED_ROWS)
+    persist(fallback)
     return fallback
   }
+  // 旧版本数据缺字段时按旧记录补齐，新版本数据只做幂等归一。
+  const merged = { ...clone(SEED_ROWS), ...parsed }
+  const migrated = migrateRows(merged)
+  persist(migrated)
+  return migrated
 }
 
 let cache: Record<string, EntryRow[]> | null = null
@@ -43,9 +56,12 @@ export function listRows(key: string): EntryRow[] {
 export function saveRows(key: string, rows: EntryRow[]): void {
   const next = { ...allRows(), [key]: rows }
   cache = next
-  if (typeof window !== 'undefined' && window.localStorage) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-  }
+  persist(next)
+}
+
+export function saveAll(data: Record<string, EntryRow[]>): void {
+  cache = data
+  persist(data)
 }
 
 export function resetRows(key: string): EntryRow[] {

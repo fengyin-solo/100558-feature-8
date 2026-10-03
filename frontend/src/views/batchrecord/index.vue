@@ -37,6 +37,7 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>放行数量（与放行单共用一份）</th>
           <th>当前状态</th>
           <th>可执行动作</th>
         </tr>
@@ -44,6 +45,7 @@
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td>{{ sharedQty(row) }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -58,7 +60,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无批生产记录数据，可先登记批生产记录</td>
+          <td :colspan="columns.length + 3" class="empty-state">暂无批生产记录数据，可先登记批生产记录</td>
         </tr>
       </tbody>
     </table>
@@ -79,10 +81,13 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { releasedQtyOfBatch } from '@/api/release-service'
+import { useSessionStore } from '@/stores/session'
 import type { EntryRow } from '@/data/types'
 
+const store = useSessionStore()
 const meta = moduleMeta('batchrecord')
-const columns = ["批号", "产品名称", "生产工序", "投料量", "操作人", "复核人", "起始时间", "批记录状态"]
+const columns = ["批号", "产品名称", "生产工序", "投料量", "操作人", "复核人", "起始时间", "批记录状态", "放行台账回写"]
 const actions = ["提交编制", "送交复核", "归档批记录"]
 const statuses = ["待编制", "编制中", "已复核", "已归档"]
 const stats = [{"label": "待编制批记录", "value": 0}, {"label": "编制中批记录", "value": 0}, {"label": "本月归档数", "value": 0}]
@@ -99,6 +104,15 @@ const statusSummary = computed(() =>
   })),
 )
 
+/** 放行数量多处共用一份：批记录页只读取放行单的数量，不在台账另存副本。 */
+function sharedQty(row: EntryRow): string {
+  const hit = releasedQtyOfBatch(String(row['批号']))
+  if (!hit) {
+    return '—'
+  }
+  return `${hit.qty} ${hit.unit}｜${hit.status}｜${hit.orderNo}`
+}
+
 function resetFilters() {
   filters.value = {}
   reload()
@@ -114,7 +128,7 @@ function openCreate() {
 
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
+  const result = applyAction(meta.key, Number(row.id), action, store.user)
   if (!result.ok) {
     errorMessage.value = result.message
     return

@@ -1,5 +1,7 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import type { UserAccount } from '@/data/access'
+import { runReleaseAction } from './release-service'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
@@ -28,8 +30,21 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
-export function runAction(key: string, id: number, action: string): ActionResult {
+export function runAction(
+  key: string,
+  id: number,
+  action: string,
+  user?: UserAccount,
+  reason = '',
+): ActionResult {
   const meta = moduleMeta(key)
+  // 物料放行走专用状态机：仓库归属、分工放行人、质量部冻结/解冻、数量越界都在那里把关。
+  if (key === 'materialrelease') {
+    if (!user) {
+      return { ok: false, message: '未识别当前操作人，放行操作需要实名鉴权' }
+    }
+    return runReleaseAction(id, action, reason, user)
+  }
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
